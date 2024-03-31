@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -30,10 +30,6 @@ std::string kindToString(const Value& v, Runtime* rt = nullptr) {
     return "a number";
   } else if (v.isString()) {
     return "a string";
-  } else if (v.isSymbol()) {
-    return "a symbol";
-  } else if (v.isBigInt()) {
-    return "a bigint";
   } else {
     assert(v.isObject() && "Expecting object.");
     return rt != nullptr && v.getObject(*rt).isFunction(*rt) ? "a function"
@@ -64,6 +60,14 @@ Value callGlobalFunction(Runtime& runtime, const char* name, const Value& arg) {
 
 } // namespace
 
+namespace detail {
+
+void throwJSError(Runtime& rt, const char* msg) {
+  throw JSError(rt, msg);
+}
+
+} // namespace detail
+
 Buffer::~Buffer() = default;
 
 PreparedJavaScript::~PreparedJavaScript() = default;
@@ -80,8 +84,6 @@ void HostObject::set(Runtime& rt, const PropNameID& name, const Value&) {
 }
 
 HostObject::~HostObject() {}
-
-NativeState::~NativeState() {}
 
 Runtime::~Runtime() {}
 
@@ -238,8 +240,6 @@ Value::Value(Runtime& runtime, const Value& other) : Value(other.kind_) {
     data_.number = other.data_.number;
   } else if (kind_ == SymbolKind) {
     new (&data_.pointer) Pointer(runtime.cloneSymbol(other.data_.pointer.ptr_));
-  } else if (kind_ == BigIntKind) {
-    new (&data_.pointer) Pointer(runtime.cloneBigInt(other.data_.pointer.ptr_));
   } else if (kind_ == StringKind) {
     new (&data_.pointer) Pointer(runtime.cloneString(other.data_.pointer.ptr_));
   } else if (kind_ >= ObjectKind) {
@@ -269,10 +269,6 @@ bool Value::strictEquals(Runtime& runtime, const Value& a, const Value& b) {
       return runtime.strictEquals(
           static_cast<const Symbol&>(a.data_.pointer),
           static_cast<const Symbol&>(b.data_.pointer));
-    case BigIntKind:
-      return runtime.strictEquals(
-          static_cast<const BigInt&>(a.data_.pointer),
-          static_cast<const BigInt&>(b.data_.pointer));
     case StringKind:
       return runtime.strictEquals(
           static_cast<const String&>(a.data_.pointer),
@@ -283,15 +279,6 @@ bool Value::strictEquals(Runtime& runtime, const Value& a, const Value& b) {
           static_cast<const Object&>(b.data_.pointer));
   }
   return false;
-}
-
-bool Value::asBool() const {
-  if (!isBool()) {
-    throw JSINativeException(
-        "Value is " + kindToString(*this) + ", expected a boolean");
-  }
-
-  return getBool();
 }
 
 double Value::asNumber() const {
@@ -340,24 +327,6 @@ Symbol Value::asSymbol(Runtime& rt) && {
   return std::move(*this).getSymbol(rt);
 }
 
-BigInt Value::asBigInt(Runtime& rt) const& {
-  if (!isBigInt()) {
-    throw JSError(
-        rt, "Value is " + kindToString(*this, &rt) + ", expected a BigInt");
-  }
-
-  return getBigInt(rt);
-}
-
-BigInt Value::asBigInt(Runtime& rt) && {
-  if (!isBigInt()) {
-    throw JSError(
-        rt, "Value is " + kindToString(*this, &rt) + ", expected a BigInt");
-  }
-
-  return std::move(*this).getBigInt(rt);
-}
-
 String Value::asString(Runtime& rt) const& {
   if (!isString()) {
     throw JSError(
@@ -379,20 +348,6 @@ String Value::asString(Runtime& rt) && {
 String Value::toString(Runtime& runtime) const {
   Function toString = runtime.global().getPropertyAsFunction(runtime, "String");
   return toString.call(runtime, *this).getString(runtime);
-}
-
-uint64_t BigInt::asUint64(Runtime& runtime) const {
-  if (!isUint64(runtime)) {
-    throw JSError(runtime, "Lossy truncation in BigInt64::asUint64");
-  }
-  return getUint64(runtime);
-}
-
-int64_t BigInt::asInt64(Runtime& runtime) const {
-  if (!isInt64(runtime)) {
-    throw JSError(runtime, "Lossy truncation in BigInt64::asInt64");
-  }
-  return getInt64(runtime);
 }
 
 Array Array::createWithElements(

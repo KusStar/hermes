@@ -1,9 +1,4 @@
-/*
- * Copyright (c) Meta Platforms, Inc. and affiliates.
- *
- * This source code is licensed under the MIT license found in the
- * LICENSE file in the root directory of this source tree.
- */
+// Copyright 2004-present Facebook. All Rights Reserved.
 
 #pragma once
 
@@ -20,9 +15,6 @@ inline Value toValue(Runtime&, bool b) {
 inline Value toValue(Runtime&, double d) {
   return Value(d);
 }
-inline Value toValue(Runtime&, float f) {
-  return Value(static_cast<double>(f));
-}
 inline Value toValue(Runtime&, int i) {
   return Value(i);
 }
@@ -30,7 +22,7 @@ inline Value toValue(Runtime& runtime, const char* str) {
   return String::createFromAscii(runtime, str);
 }
 inline Value toValue(Runtime& runtime, const std::string& str) {
-  return String::createFromUtf8(runtime, str);
+  return String::createFromAscii(runtime, str);
 }
 template <typename T>
 inline Value toValue(Runtime& runtime, const T& other) {
@@ -56,12 +48,7 @@ inline PropNameID&& toPropNameID(Runtime&, PropNameID&& name) {
   return std::move(name);
 }
 
-/// Helper to throw while still compiling with exceptions turned off.
-template <typename E, typename... Args>
-[[noreturn]] inline void throwOrDie(Args&&... args) {
-  std::rethrow_exception(
-      std::make_exception_ptr(E{std::forward<Args>(args)...}));
-}
+void throwJSError(Runtime&, const char* msg);
 
 } // namespace detail
 
@@ -189,8 +176,7 @@ inline std::shared_ptr<T> Object::getHostObject(Runtime& runtime) const {
 template <typename T>
 inline std::shared_ptr<T> Object::asHostObject(Runtime& runtime) const {
   if (!isHostObject<T>(runtime)) {
-    detail::throwOrDie<JSINativeException>(
-        "Object is not a HostObject of desired type");
+    detail::throwJSError(runtime, "Object is not a HostObject of desired type");
   }
   return std::static_pointer_cast<T>(runtime.getHostObject(*this));
 }
@@ -200,29 +186,6 @@ inline std::shared_ptr<HostObject> Object::getHostObject<HostObject>(
     Runtime& runtime) const {
   assert(runtime.isHostObject(*this));
   return runtime.getHostObject(*this);
-}
-
-template <typename T>
-inline bool Object::hasNativeState(Runtime& runtime) const {
-  return runtime.hasNativeState(*this) &&
-      std::dynamic_pointer_cast<T>(runtime.getNativeState(*this));
-}
-
-template <>
-inline bool Object::hasNativeState<NativeState>(Runtime& runtime) const {
-  return runtime.hasNativeState(*this);
-}
-
-template <typename T>
-inline std::shared_ptr<T> Object::getNativeState(Runtime& runtime) const {
-  assert(hasNativeState<T>(runtime));
-  return std::static_pointer_cast<T>(runtime.getNativeState(*this));
-}
-
-inline void Object::setNativeState(
-    Runtime& runtime,
-    std::shared_ptr<NativeState> state) const {
-  runtime.setNativeState(*this, state);
 }
 
 inline Array Object::getPropertyNames(Runtime& runtime) const {
@@ -265,8 +228,9 @@ inline Value Function::call(Runtime& runtime, std::initializer_list<Value> args)
 template <typename... Args>
 inline Value Function::call(Runtime& runtime, Args&&... args) const {
   // A more awesome version of this would be able to create raw values
-  // which can be used directly without wrapping and unwrapping, but
-  // this will do for now.
+  // which can be used directly as HermesValues, instead of having to
+  // wrap the args in Values and hvFromValue on each to unwrap them.
+  // But this will do for now.
   return call(runtime, {detail::toValue(runtime, std::forward<Args>(args))...});
 }
 
@@ -291,8 +255,9 @@ inline Value Function::callWithThis(
     const Object& jsThis,
     Args&&... args) const {
   // A more awesome version of this would be able to create raw values
-  // which can be used directly without wrapping and unwrapping, but
-  // this will do for now.
+  // which can be used directly as HermesValues, instead of having to
+  // wrap the args in Values and hvFromValue on each to unwrap them.
+  // But this will do for now.
   return callWithThis(
       runtime, jsThis, {detail::toValue(runtime, std::forward<Args>(args))...});
 }
@@ -339,10 +304,6 @@ inline Value Function::callAsConstructor(Runtime& runtime, Args&&... args)
     const {
   return callAsConstructor(
       runtime, {detail::toValue(runtime, std::forward<Args>(args))...});
-}
-
-String BigInt::toString(Runtime& runtime, int radix) const {
-  return runtime.bigintToString(*this, radix);
 }
 
 } // namespace jsi

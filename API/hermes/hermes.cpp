@@ -29,7 +29,6 @@
 #include "hermes/VM/JSLib.h"
 #include "hermes/VM/JSLib/RuntimeCommonStorage.h"
 #include "hermes/VM/JSLib/RuntimeJSONUtils.h"
-#include "hermes/VM/NativeState.h"
 #include "hermes/VM/Operations.h"
 #include "hermes/VM/Profiler/CodeCoverageProfiler.h"
 #include "hermes/VM/Profiler/SamplingProfiler.h"
@@ -55,6 +54,7 @@
 
 #include <jsi/instrumentation.h>
 #include <jsi/threadsafe.h>
+#include <jsi/jsi-inl.h>
 
 #ifdef HERMESVM_LLVM_PROFILE_DUMP
 extern "C" {
@@ -601,7 +601,7 @@ class HermesRuntimeImpl final : public HermesRuntime,
     } else if (value.isNumber()) {
       return vm::HermesValue::encodeUntrustedDoubleValue(value.getNumber());
     } else if (
-        value.isSymbol() || value.isBigInt() || value.isString() ||
+        value.isSymbol() || value.isString() ||
         value.isObject()) {
       return phv(value);
     } else {
@@ -620,7 +620,7 @@ class HermesRuntimeImpl final : public HermesRuntime,
       return runtime_.makeHandle(
           vm::HermesValue::encodeUntrustedDoubleValue(value.getNumber()));
     } else if (
-        value.isSymbol() || value.isBigInt() || value.isString() ||
+        value.isSymbol() || value.isString() ||
         value.isObject()) {
       return vm::Handle<vm::HermesValue>(&phv(value));
     } else {
@@ -639,8 +639,6 @@ class HermesRuntimeImpl final : public HermesRuntime,
       return hv.getDouble();
     } else if (hv.isSymbol()) {
       return add<jsi::Symbol>(hv);
-    } else if (hv.isBigInt()) {
-      return add<jsi::BigInt>(hv);
     } else if (hv.isString()) {
       return add<jsi::String>(hv);
     } else if (hv.isObject()) {
@@ -674,7 +672,6 @@ class HermesRuntimeImpl final : public HermesRuntime,
   jsi::Instrumentation &instrumentation() override;
 
   PointerValue *cloneSymbol(const Runtime::PointerValue *pv) override;
-  PointerValue *cloneBigInt(const Runtime::PointerValue *pv) override;
   PointerValue *cloneString(const Runtime::PointerValue *pv) override;
   PointerValue *cloneObject(const Runtime::PointerValue *pv) override;
   PointerValue *clonePropNameID(const Runtime::PointerValue *pv) override;
@@ -684,18 +681,10 @@ class HermesRuntimeImpl final : public HermesRuntime,
   jsi::PropNameID createPropNameIDFromUtf8(const uint8_t *utf8, size_t length)
       override;
   jsi::PropNameID createPropNameIDFromString(const jsi::String &str) override;
-  jsi::PropNameID createPropNameIDFromSymbol(const jsi::Symbol &sym) override;
   std::string utf8(const jsi::PropNameID &) override;
   bool compare(const jsi::PropNameID &, const jsi::PropNameID &) override;
 
   std::string symbolToString(const jsi::Symbol &) override;
-
-  jsi::BigInt createBigIntFromInt64(int64_t) override;
-  jsi::BigInt createBigIntFromUint64(uint64_t) override;
-  bool bigintIsInt64(const jsi::BigInt &) override;
-  bool bigintIsUint64(const jsi::BigInt &) override;
-  uint64_t truncate(const jsi::BigInt &) override;
-  jsi::String bigintToString(const jsi::BigInt &, int) override;
 
   jsi::String createStringFromAscii(const char *str, size_t length) override;
   jsi::String createStringFromUtf8(const uint8_t *utf8, size_t length) override;
@@ -708,11 +697,6 @@ class HermesRuntimeImpl final : public HermesRuntime,
   jsi::Object createObject(std::shared_ptr<jsi::HostObject> ho) override;
   std::shared_ptr<jsi::HostObject> getHostObject(const jsi::Object &) override;
   jsi::HostFunctionType &getHostFunction(const jsi::Function &) override;
-  bool hasNativeState(const jsi::Object &) override;
-  std::shared_ptr<jsi::NativeState> getNativeState(
-      const jsi::Object &) override;
-  void setNativeState(const jsi::Object &, std::shared_ptr<jsi::NativeState>)
-      override;
   jsi::Value getProperty(const jsi::Object &, const jsi::PropNameID &name)
       override;
   jsi::Value getProperty(const jsi::Object &, const jsi::String &name) override;
@@ -759,7 +743,6 @@ class HermesRuntimeImpl final : public HermesRuntime,
       size_t count) override;
 
   bool strictEquals(const jsi::Symbol &a, const jsi::Symbol &b) const override;
-  bool strictEquals(const jsi::BigInt &a, const jsi::BigInt &b) const override;
   bool strictEquals(const jsi::String &a, const jsi::String &b) const override;
   bool strictEquals(const jsi::Object &a, const jsi::Object &b) const override;
 
@@ -1229,10 +1212,6 @@ uint64_t HermesRuntime::getUniqueID(const jsi::Object &o) const {
   return impl(this)->runtime_.getHeap().getObjectID(
       static_cast<vm::GCCell *>(impl(this)->phv(o).getObject()));
 }
-uint64_t HermesRuntime::getUniqueID(const jsi::BigInt &s) const {
-  return impl(this)->runtime_.getHeap().getObjectID(
-      static_cast<vm::GCCell *>(impl(this)->phv(s).getBigInt()));
-}
 uint64_t HermesRuntime::getUniqueID(const jsi::String &s) const {
   return impl(this)->runtime_.getHeap().getObjectID(
       static_cast<vm::GCCell *>(impl(this)->phv(s).getString()));
@@ -1555,11 +1534,6 @@ jsi::Runtime::PointerValue *HermesRuntimeImpl::cloneSymbol(
   return clone(pv);
 }
 
-jsi::Runtime::PointerValue *HermesRuntimeImpl::cloneBigInt(
-    const Runtime::PointerValue *pv) {
-  return clone(pv);
-}
-
 jsi::Runtime::PointerValue *HermesRuntimeImpl::cloneString(
     const Runtime::PointerValue *pv) {
   return clone(pv);
@@ -1615,11 +1589,6 @@ jsi::PropNameID HermesRuntimeImpl::createPropNameIDFromString(
   return add<jsi::PropNameID>(cr->getHermesValue());
 }
 
-jsi::PropNameID HermesRuntimeImpl::createPropNameIDFromSymbol(
-    const jsi::Symbol &sym) {
-  return add<jsi::PropNameID>(phv(sym));
-}
-
 std::string HermesRuntimeImpl::utf8(const jsi::PropNameID &sym) {
   vm::GCScope gcScope(runtime_);
   vm::SymbolID id = phv(sym).getSymbol();
@@ -1660,56 +1629,6 @@ std::string HermesRuntimeImpl::symbolToString(const jsi::Symbol &sym) {
   checkStatus(res.getStatus());
 
   return toStdString(runtime_, res.getValue());
-}
-
-jsi::BigInt HermesRuntimeImpl::createBigIntFromInt64(int64_t value) {
-  vm::GCScope gcScope(runtime_);
-  vm::CallResult<vm::HermesValue> res =
-      vm::BigIntPrimitive::fromSigned(runtime_, value);
-  checkStatus(res.getStatus());
-  return add<jsi::BigInt>(*res);
-}
-
-jsi::BigInt HermesRuntimeImpl::createBigIntFromUint64(uint64_t value) {
-  vm::GCScope gcScope(runtime_);
-  vm::CallResult<vm::HermesValue> res =
-      vm::BigIntPrimitive::fromUnsigned(runtime_, value);
-  checkStatus(res.getStatus());
-  return add<jsi::BigInt>(*res);
-}
-
-bool HermesRuntimeImpl::bigintIsInt64(const jsi::BigInt &bigint) {
-  constexpr bool signedTruncation = true;
-  return phv(bigint).getBigInt()->isTruncationToSingleDigitLossless(
-      signedTruncation);
-}
-
-bool HermesRuntimeImpl::bigintIsUint64(const jsi::BigInt &bigint) {
-  constexpr bool signedTruncation = false;
-  return phv(bigint).getBigInt()->isTruncationToSingleDigitLossless(
-      signedTruncation);
-}
-
-uint64_t HermesRuntimeImpl::truncate(const jsi::BigInt &bigint) {
-  auto digit = phv(bigint).getBigInt()->truncateToSingleDigit();
-  static_assert(
-      sizeof(digit) == sizeof(uint64_t),
-      "BigInt digit is no longer sizeof(uint64_t) bytes.");
-  return digit;
-}
-
-jsi::String HermesRuntimeImpl::bigintToString(
-    const jsi::BigInt &bigint,
-    int radix) {
-  if (radix < 2 || radix > 36) {
-    throw makeJSError(*this, "Invalid radix ", radix, " to BigInt.toString");
-  }
-
-  vm::GCScope gcScope(runtime_);
-  vm::CallResult<vm::HermesValue> toStringRes =
-      phv(bigint).getBigInt()->toString(runtime_, radix);
-  checkStatus(toStringRes.getStatus());
-  return add<jsi::String>(*toStringRes);
 }
 
 jsi::String HermesRuntimeImpl::createStringFromAscii(
@@ -1771,77 +1690,6 @@ std::shared_ptr<jsi::HostObject> HermesRuntimeImpl::getHostObject(
   const vm::HostObjectProxy *proxy =
       vm::vmcast<vm::HostObject>(phv(obj))->getProxy();
   return static_cast<const JsiProxy *>(proxy)->ho_;
-}
-
-bool HermesRuntimeImpl::hasNativeState(const jsi::Object &obj) {
-  vm::GCScope gcScope(runtime_);
-  auto h = handle(obj);
-  if (h->isProxyObject() || h->isHostObject()) {
-    return false;
-  }
-  vm::NamedPropertyDescriptor desc;
-  return vm::JSObject::getOwnNamedDescriptor(
-      h,
-      runtime_,
-      vm::Predefined::getSymbolID(vm::Predefined::InternalPropertyNativeState),
-      desc);
-}
-
-static void deleteShared(void *context) {
-  delete reinterpret_cast<std::shared_ptr<jsi::NativeState> *>(context);
-}
-
-void HermesRuntimeImpl::setNativeState(
-    const jsi::Object &obj,
-    std::shared_ptr<jsi::NativeState> state) {
-  vm::GCScope gcScope(runtime_);
-  auto h = handle(obj);
-  if (h->isProxyObject()) {
-    throw jsi::JSINativeException("native state unsupported on Proxy");
-  } else if (h->isHostObject()) {
-    throw jsi::JSINativeException("native state unsupported on HostObject");
-  }
-  // Allocate a shared_ptr on the C++ heap and use it as context of
-  // NativeState.
-  auto *ptr = new std::shared_ptr<jsi::NativeState>(std::move(state));
-  auto ns =
-      runtime_.makeHandle(vm::NativeState::create(runtime_, ptr, deleteShared));
-  auto res = vm::JSObject::defineOwnProperty(
-      h,
-      runtime_,
-      vm::Predefined::getSymbolID(vm::Predefined::InternalPropertyNativeState),
-      vm::DefinePropertyFlags::getDefaultNewPropertyFlags(),
-      ns);
-  // NB: If setting the property failed, then the NativeState cell will soon
-  // be unreachable, and when it's later finalized, the shared_ptr will be
-  // deleted.
-  checkStatus(res.getStatus());
-  if (!*res) {
-    throw jsi::JSINativeException(
-        "failed to define internal native state property");
-  }
-}
-
-std::shared_ptr<jsi::NativeState> HermesRuntimeImpl::getNativeState(
-    const jsi::Object &obj) {
-  vm::GCScope gcScope(runtime_);
-  assert(hasNativeState(obj) && "object lacks native state");
-  auto h = handle(obj);
-  vm::NamedPropertyDescriptor desc;
-  bool exists = vm::JSObject::getOwnNamedDescriptor(
-      h,
-      runtime_,
-      vm::Predefined::getSymbolID(vm::Predefined::InternalPropertyNativeState),
-      desc);
-  (void)exists;
-  assert(exists && "hasNativeState lied");
-  // Raw pointers below.
-  vm::NoAllocScope scope(runtime_);
-  vm::NativeState *ns = vm::vmcast<vm::NativeState>(
-      vm::JSObject::getNamedSlotValueUnsafe(*h, runtime_, desc)
-          .getObject(runtime_));
-  return std::shared_ptr(
-      *reinterpret_cast<std::shared_ptr<jsi::NativeState> *>(ns->context()));
 }
 
 jsi::Value HermesRuntimeImpl::getProperty(
@@ -2185,11 +2033,6 @@ jsi::Value HermesRuntimeImpl::callAsConstructor(
 bool HermesRuntimeImpl::strictEquals(const jsi::Symbol &a, const jsi::Symbol &b)
     const {
   return phv(a).getSymbol() == phv(b).getSymbol();
-}
-
-bool HermesRuntimeImpl::strictEquals(const jsi::BigInt &a, const jsi::BigInt &b)
-    const {
-  return phv(a).getBigInt()->compare(phv(b).getBigInt()) == 0;
 }
 
 bool HermesRuntimeImpl::strictEquals(const jsi::String &a, const jsi::String &b)
