@@ -430,7 +430,7 @@ uint64_t cpu_cycle_counter() {
 #else
   LARGE_INTEGER cnt;
   QueryPerformanceCounter(&cnt);
-  return cnt;
+  return static_cast<uint64_t>(cnt.QuadPart);
 #endif
 }
 

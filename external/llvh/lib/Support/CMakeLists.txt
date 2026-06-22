@@ -1,6 +1,7 @@
 add_hermes_library(LLVHSupport
     APFloat.cpp
     APInt.cpp
+    Atomic.cpp
     circular_raw_ostream.cpp
     CommandLine.cpp
     ConvertUTF.cpp

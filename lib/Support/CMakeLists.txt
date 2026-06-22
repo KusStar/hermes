@@ -12,6 +12,10 @@ if (ANDROID)
   list(APPEND link_libs log)
 endif()
 
+if (WIN32)
+  list(APPEND link_libs psapi)
+endif()
+
 add_hermes_library(hermesSupport
         Allocator.cpp
         Base64.cpp
