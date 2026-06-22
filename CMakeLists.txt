@@ -319,6 +319,12 @@ if(HAVE_ICF)
   list(APPEND HERMES_EXTRA_LINKER_FLAGS "LINKER:--icf=safe")
 endif()
 
+if(HERMES_IS_ANDROID)
+  list(APPEND HERMES_EXTRA_LINKER_FLAGS
+    "LINKER:-z,max-page-size=16384"
+    "LINKER:-z,common-page-size=16384")
+endif()
+
 # Make the HERMES_RELEASE_VERSION accessible for version printing in C++.
 if(HERMES_RELEASE_VERSION)
     add_definitions(-DHERMES_RELEASE_VERSION="${HERMES_RELEASE_VERSION}")
